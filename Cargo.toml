@@ -1,0 +1,19 @@
+[package]
+name = "drmeter"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dasp_sample = "0.11"
+dasp_frame = "0.11"
+
+[dev-dependencies]
+# dr meter example
+ffmpeg-next = "5.0.3"
+float_eq = "1.0"
+# utils.rs
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
+rand = "0.7"
