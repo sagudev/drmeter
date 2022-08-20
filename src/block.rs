@@ -41,8 +41,8 @@ impl Block {
 
     /// Return finalized block results
     ///
-    /// NOTE: This does not finalize block, so you can still feed it,
-    /// but you must use `reset` method to really finalize the block.
+    /// NOTE: This does not finalize block, so you can still feed it.
+    /// You must use `reset` method to really finalize the block.
     pub fn finish(&mut self) -> (Box<[f64]>, Box<[f64]>) {
         (
             self.sample_peak.clone(),

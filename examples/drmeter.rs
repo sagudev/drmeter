@@ -2,7 +2,6 @@ use drmeter::DRMeter;
 use ffmpeg::format::sample::Type;
 use ffmpeg::format::Sample;
 use ffmpeg::util::frame::audio::Audio as FAudio;
-
 use ffmpeg_next as ffmpeg;
 
 fn main() {

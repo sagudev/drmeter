@@ -1,31 +1,8 @@
-use std::{error, fmt};
+use std::fmt;
 
 use crate::block::Block;
-use crate::utils::{decibel, sqr};
-use crate::utils::{Interleaved, Planar, Sample, Samples};
-
-/// Error values for [`EbuR128`](struct.EbuR128.html) functions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    /// Not enough memory
-    NoMem,
-    /// Invalid channel index passed
-    InvalidChannelIndex,
-    /// Finalized
-    Finalized,
-}
-
-impl error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::NoMem => write!(f, "NoMem"),
-            Error::InvalidChannelIndex => write!(f, "Invalid Channel Index"),
-            Error::Finalized => write!(f, "DR Meter instance is finalized"),
-        }
-    }
-}
+use crate::utils::{decibel, sqr, Interleaved, Planar, Sample, Samples};
+use crate::Error;
 
 /// upper 20% histogram values
 const LOUD_FRACTION: f64 = 0.2;
@@ -47,8 +24,10 @@ pub struct DRMeter {
     /* user passed options */
     /// The sample rate.
     rate: u32,
+
     /// The number of channels
     channels: u32,
+
     /// window length in ms
     ///
     /// Default 3000ms
@@ -161,9 +140,43 @@ impl DRMeter {
         self.window
     }
 
-    /// Returns true if this instance is finalized.
+    /// Returns `true` if this instance is finalized.
     pub const fn finalized(&self) -> bool {
         self.finalized
+    }
+
+    /// Finalize current block
+    fn finalize_block(&mut self) {
+        debug_assert_ne!(self.block.consumed_frames(), 0);
+        let (peak, rms) = self.block.finish();
+        for ch in 0..(self.channels as usize) {
+            //println!("[CH {ch}] {}", rms[ch]);
+            let rms_bin = ((rms[ch] * BINS as f64).round() as usize).clamp(0, BINS);
+            let peak_bin = ((peak[ch] * BINS as f64) as usize).clamp(0, BINS);
+            self.rms[ch][rms_bin] += 1;
+            self.peaks[ch][peak_bin] += 1;
+        }
+        self.block_number += 1;
+        // finalize block
+        self.block.reset();
+    }
+
+    /// Finalize instance (marking end of stream)
+    ///
+    /// For streaming, DR values are computed using only fully finished blocks,
+    /// but if you reached the end of stream you can use this function
+    /// to forces finalization of half block if such block even exist.
+    ///
+    /// After finalization you cannot add frames to the instance.
+    pub fn finalize(&mut self) -> Result<(), Error> {
+        if self.finalized() {
+            return Err(Error::Finalized);
+        }
+
+        if self.block.consumed_frames() != 0 {
+            self.finalize_block()
+        }
+        Ok(())
     }
 
     /***********************
@@ -203,7 +216,7 @@ impl DRMeter {
                 src = next;
             } else {
                 let (current, next) = src.split_at(num_frames);
-                // current readed frames for blocker
+                // currently read frames for block processor
                 self.block.process(current);
                 // we get unfinished block
 
@@ -212,35 +225,6 @@ impl DRMeter {
             }
         }
 
-        Ok(())
-    }
-
-    fn finalize_block(&mut self) {
-        let (peak, rms) = self.block.finish();
-        for ch in 0..(self.channels as usize) {
-            //println!("[CH {ch}] {}", rms[ch]);
-            let rms_bin = ((rms[ch] * BINS as f64).round() as usize).clamp(0, BINS);
-            let peak_bin = ((peak[ch] * BINS as f64) as usize).clamp(0, BINS);
-            self.rms[ch][rms_bin] += 1;
-            self.peaks[ch][peak_bin] += 1;
-        }
-        self.block_number += 1;
-        // finalize block
-        self.block.reset();
-    }
-
-    /// By default DR values are computed using all fully finished blocks.
-    /// This forces to finalization of half block if exist.
-    ///
-    /// After running this the instance is NOT USABLE
-    pub fn finalize(&mut self) -> Result<(), Error> {
-        if self.finalized() {
-            return Err(Error::Finalized);
-        }
-
-        if self.block.consumed_frames() != 0 {
-            self.finalize_block()
-        }
         Ok(())
     }
 
@@ -354,6 +338,10 @@ impl DRMeter {
     }
 
     /// Return exact channel DR
+    ///
+    /// NOTE: DR values are computed using only fully finished blocks,
+    /// in case you reached the end of stream you should finalize instance
+    /// before getting the results.
     pub fn exact_channel_dr(&self, channel_number: u32) -> Result<f64, Error> {
         Ok(decibel(
             self.second_peak(channel_number)?
@@ -364,12 +352,20 @@ impl DRMeter {
         ))
     }
 
-    /// Return channel DR
+    /// Return channel DR score
+    ///
+    /// NOTE: DR values are computed using only fully finished blocks,
+    /// in case you reached the end of stream you should finalize instance
+    /// before getting the results.
     pub fn channel_dr_score(&self, channel_number: u32) -> Result<u8, Error> {
         Ok(self.exact_channel_dr(channel_number)? as u8)
     }
 
     /// Return exact DR
+    ///
+    /// NOTE: DR values are computed using only fully finished blocks,
+    /// in case you reached the end of stream you should finalize instance
+    /// before getting the results.
     pub fn exact_dr(&self) -> Result<f64, Error> {
         let mut dr = 0.0;
         for ch in 0..self.channels {
@@ -378,7 +374,11 @@ impl DRMeter {
         Ok(dr / self.channels as f64)
     }
 
-    /// Return DR
+    /// Return DR score
+    ///
+    /// NOTE: DR values are computed using only fully finished blocks,
+    /// in case you reached the end of stream you should finalize instance
+    /// before getting the results.
     pub fn dr_score(&self) -> Result<u8, Error> {
         Ok(self.exact_dr()? as u8)
     }
