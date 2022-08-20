@@ -1,4 +1,4 @@
-# drmeter [![crates.io](https://img.shields.io/crates/v/drmeter.svg)](https://crates.io/crates/drmeter) [![Actions Status](https://github.com/sagudev/drmeter/workflows/drmeter/badge.svg)](https://github.com/sagudev/drmeter/actions) [![docs.rs](https://docs.rs/drmeter/badge.svg)](https://docs.rs/drmeter)
+# drmeter [![crates.io](https://img.shields.io/crates/v/drmeter.svg)](https://crates.io/crates/drmeter) [![Actions Status](https://github.com/sagudev/drmeter/workflows/CI/badge.svg)](https://github.com/sagudev/drmeter/actions) [![docs.rs](https://docs.rs/drmeter/badge.svg)](https://docs.rs/drmeter)
 
 Implementation of the [TT DR Meter](https://web.archive.org/web/20180917133436/http://www.dynamicrange.de/sites/default/files/Measuring%20DR%20ENv3.pdf).
 
