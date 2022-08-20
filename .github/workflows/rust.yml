@@ -14,10 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: |
-        sudo add-apt-repository ppa:savoury1/ffmpeg4 -y
-        sudo add-apt-repository ppa:savoury1/ffmpeg5 -y
-        sudo apt update
-        sudo apt install ffmpeg
+          sudo add-apt-repository ppa:savoury1/ffmpeg4 -y
+          sudo add-apt-repository ppa:savoury1/ffmpeg5 -y
+          sudo apt update
+          sudo apt install ffmpeg
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --verbose
