@@ -41,9 +41,6 @@ pub struct DRMeter {
     /// (egg. stereo frame has two samples)
     needed_frames: usize,
 
-    /// Finalized
-    finalized: bool,
-
     /// Block Worker
     block: Block,
 
@@ -56,6 +53,13 @@ pub struct DRMeter {
 
     /// RMS bins per channel
     rms: Box<[Box<[u32]>]>,
+
+    /// cached exact dr scores per channel
+    /// that are generated when the instance is finalized
+    ///
+    /// Other values are pretty easy to calculate from these,
+    /// so these ones are the only we cache
+    channel_dr: Option<Box<[f64]>>,
 }
 
 impl fmt::Debug for DRMeter {
@@ -65,7 +69,6 @@ impl fmt::Debug for DRMeter {
             .field("channels", &self.channels)
             .field("window", &self.window)
             .field("needed_frames", &self.needed_frames)
-            .field("finalized", &self.finalized)
             .field("block", &self.block)
             .field("block_number", &self.block_number)
             //.field("peaks", &self.peaks)
@@ -115,7 +118,7 @@ impl DRMeter {
             block_number: 0,
             window,
             block: Block::new(channels),
-            finalized: false,
+            channel_dr: None,
         })
     }
 
@@ -142,7 +145,8 @@ impl DRMeter {
 
     /// Returns `true` if this instance is finalized.
     pub const fn finalized(&self) -> bool {
-        self.finalized
+        // instance is finalized if we have cached values
+        self.channel_dr.is_some()
     }
 
     /// Finalize current block
@@ -167,15 +171,26 @@ impl DRMeter {
     /// but if you reached the end of stream you can use this function
     /// to forces finalization of half block if such block even exist.
     ///
+    /// As part of finalization exact channel DR scores are also calculated and cached
+    ///
     /// After finalization you cannot add frames to the instance.
     pub fn finalize(&mut self) -> Result<(), Error> {
         if self.finalized() {
             return Err(Error::Finalized);
         }
 
+        // finalize half block if exist
         if self.block.consumed_frames() != 0 {
             self.finalize_block()
-        }
+        };
+
+        // calculate and cache exact channel values
+        self.channel_dr = Some(
+            (0..self.channels)
+                .map(|ch| self.exact_channel_dr(ch))
+                .collect::<Result<Box<[f64]>, Error>>()?,
+        );
+
         Ok(())
     }
 
@@ -331,9 +346,7 @@ impl DRMeter {
                 break;
             }
         }
-        //println!("jj: {j}");
-        //println!("RMSsum: {}", rms_sum);
-        //println!("RMS: {}", rms_sum / j as f64);
+
         Ok(rms_sum)
     }
 
@@ -343,13 +356,21 @@ impl DRMeter {
     /// in case you reached the end of stream you should finalize instance
     /// before getting the results.
     pub fn exact_channel_dr(&self, channel_number: u32) -> Result<f64, Error> {
-        Ok(decibel(
-            self.second_peak(channel_number)?
-                / f64::sqrt(
-                    self.channel_rms_sum(channel_number)?
-                        / (LOUD_FRACTION * self.block_number as f64),
-                ),
-        ))
+        if let Some(channel_dr) = &self.channel_dr {
+            if channel_number >= self.channels {
+                return Err(Error::InvalidChannelIndex);
+            }
+            Ok(channel_dr[channel_number as usize])
+        } else {
+            // channel checking inside
+            Ok(decibel(
+                self.second_peak(channel_number)?
+                    / f64::sqrt(
+                        self.channel_rms_sum(channel_number)?
+                            / (LOUD_FRACTION * self.block_number as f64),
+                    ),
+            ))
+        }
     }
 
     /// Return channel DR score
@@ -386,4 +407,20 @@ impl DRMeter {
     /*pub fn rms(&self, channels: u32) -> Result<f64, Error> {
         self.channel_rms_sum(channel_number)
     }*/
+
+    /// Get average exact DR score across multiple instances.
+    /// This can be used to calculate Albums DR score
+    pub fn exact_dr_multiple<'a>(iter: impl Iterator<Item = &'a Self>) -> Result<f64, Error> {
+        let h = iter
+            .map(|d| d.exact_dr())
+            .collect::<Result<Vec<f64>, _>>()?;
+
+        Ok(h.iter().sum::<f64>() / h.len() as f64)
+    }
+
+    /// Get average DR score across multiple instances.
+    /// This can be used to calculate Albums DR score
+    pub fn dr_score_multiple<'a>(iter: impl Iterator<Item = &'a Self>) -> Result<u8, Error> {
+        Ok(Self::exact_dr_multiple(iter)? as u8)
+    }
 }
