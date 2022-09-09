@@ -343,7 +343,6 @@ impl DRMeter {
         if let Some(channel_dr) = &self.channel_dr {
             Ok(channel_dr[channel_number as usize])
         } else {
-            // channel checking inside
             Ok(decibel(
                 self.second_peak(channel_number as usize)?
                     / f64::sqrt(

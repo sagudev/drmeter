@@ -84,7 +84,6 @@ impl Block {
             debug_assert!(channel < src.channels());
 
             src.foreach_sample(channel, |sample| {
-                //*sum2 += sample.as_f64_raw() * sample.as_f64_raw();
                 *sum2 += sample.to_sample::<f64>() * sample.to_sample::<f64>();
             });
         }
