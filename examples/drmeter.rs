@@ -129,12 +129,6 @@ fn main() {
     );
 }
 
-#[inline]
-/// The equation to convert to dBTP is: 20 * log10(n)
-pub fn lufs_to_dbtp(n: f64) -> f64 {
-    20.0 * (n).log10()
-}
-
 /// Fix from https://github.com/zmwangx/rust-ffmpeg/pull/104
 #[inline]
 fn plane<T: ffmpeg::frame::audio::Sample>(ss: &FAudio, index: usize) -> &[T] {

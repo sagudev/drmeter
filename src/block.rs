@@ -18,7 +18,7 @@ pub struct Block {
 impl Block {
     /// Creates a new [`Block`].
     pub fn new(channels: u32) -> Self {
-        assert!(channels > 0);
+        debug_assert!(channels > 0);
 
         Self {
             channels,
@@ -60,7 +60,7 @@ impl Block {
     pub fn process<'a, T: Sample + 'a, S: Samples<'a, T>>(&mut self, src: S) {
         assert!(src.channels() == self.channels as usize);
 
-        assert!(self.sample_peak.len() == self.channels as usize);
+        debug_assert!(self.sample_peak.len() == self.channels as usize);
 
         for (channel, sample_peak) in self.sample_peak.iter_mut().enumerate() {
             let mut max = 0.0;
