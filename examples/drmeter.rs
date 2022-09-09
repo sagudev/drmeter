@@ -119,14 +119,6 @@ fn main() {
             dr.channel_dr_score(ch).unwrap(),
             dr.exact_channel_dr(ch).unwrap()
         );
-        println!(
-            "First peak: {} dB",
-            lufs_to_dbtp(dr.first_peak(ch).unwrap())
-        );
-        println!(
-            "Second peak: {} dB",
-            lufs_to_dbtp(dr.second_peak(ch).unwrap())
-        );
     }
 
     println!("----------- GLOBAL -----------");

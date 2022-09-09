@@ -5,6 +5,8 @@ use std::{error, fmt};
 pub enum Error {
     /// Not enough memory
     NoMem,
+    /// Argument outside of limit
+    ArgOutside,
     /// Invalid channel index passed
     InvalidChannelIndex,
     /// DR Meter is finalized
@@ -19,6 +21,7 @@ impl fmt::Display for Error {
             Error::NoMem => write!(f, "NoMem"),
             Error::InvalidChannelIndex => write!(f, "Invalid Channel Index"),
             Error::Finalized => write!(f, "DR Meter instance is finalized"),
+            Error::ArgOutside => write!(f, "Argument outside of it's limit"),
         }
     }
 }

@@ -14,9 +14,7 @@ const MAX_CHANNELS: u32 = 64;
 
 // There are apparently two possibilities for implementation
 // one is like in ffmpeg where we do not know full number of blocks
-// when starting as we are streaming data
-// and other
-// is like
+// when starting as we are streaming data and other is like
 // [DeaDBeeF DR Meter](https://github.com/dakeryas/deadbeef-dr-meter)
 // which does know final number of blocks, but we do not
 /// DR Meter instance
@@ -71,8 +69,7 @@ impl fmt::Debug for DRMeter {
             .field("needed_frames", &self.needed_frames)
             .field("block", &self.block)
             .field("block_number", &self.block_number)
-            //.field("peaks", &self.peaks)
-            //.field("rms", &self.rms)
+            .field("channel_dr", &self.channel_dr)
             .finish()
     }
 }
@@ -83,7 +80,17 @@ impl DRMeter {
     fn allocate_bin(channels: usize) -> Result<Box<[Box<[u32]>]>, Error> {
         let _total_mem = (BINS + 1).checked_mul(channels).ok_or(Error::NoMem)?;
 
-        Ok(vec![vec![0; BINS + 1].into_boxed_slice(); channels as usize].into_boxed_slice())
+        Ok(vec![vec![0; BINS + 1].into_boxed_slice(); channels].into_boxed_slice())
+    }
+
+    /// Check channel number (index)
+    ///
+    /// This function should be called from all public functions that takes channel number as parameter
+    const fn check_channel(&self, ch: u32) -> Result<(), Error> {
+        if ch >= self.channels {
+            return Err(Error::InvalidChannelIndex);
+        }
+        Ok(())
     }
 
     /// Create a new instance with default window of 3s.
@@ -92,16 +99,20 @@ impl DRMeter {
     }
 
     /// Create a new instance with the given configuration.
+    ///
+    /// Max channels is 64, rate limit is 2_822_400 and min window is 10 (ms)
     pub fn new_with_window(channels: u32, rate: u32, window: usize) -> Result<Self, Error> {
         if channels == 0 || channels > MAX_CHANNELS {
-            return Err(Error::NoMem);
+            return Err(Error::ArgOutside);
         }
 
         if !(16..=MAX_RATE).contains(&rate) {
-            return Err(Error::NoMem);
+            return Err(Error::ArgOutside);
         }
 
-        assert!(window >= 10);
+        if window < 10 {
+            return Err(Error::ArgOutside);
+        }
 
         // TODO: some pushover +5
         // FFMPEG: samples = time_constant * sample_rate + .5
@@ -154,9 +165,8 @@ impl DRMeter {
         debug_assert_ne!(self.block.consumed_frames(), 0);
         let (peak, rms) = self.block.finish();
         for ch in 0..(self.channels as usize) {
-            //println!("[CH {ch}] {}", rms[ch]);
             let rms_bin = ((rms[ch] * BINS as f64).round() as usize).clamp(0, BINS);
-            let peak_bin = ((peak[ch] * BINS as f64) as usize).clamp(0, BINS);
+            let peak_bin = ((peak[ch] * BINS as f64).round() as usize).clamp(0, BINS);
             self.rms[ch][rms_bin] += 1;
             self.peaks[ch][peak_bin] += 1;
         }
@@ -289,60 +299,33 @@ impl DRMeter {
      *
      ************/
 
-    /// Find bin index of first peak
-    fn find_first_peak(&self, channel_number: u32) -> Result<usize, Error> {
-        if channel_number >= self.channels {
-            return Err(Error::InvalidChannelIndex);
-        }
-
-        Ok(BINS
-            - self.peaks[channel_number as usize]
-                .iter()
-                .rev()
-                .position(|&x| x != 0)
-                .unwrap())
-    }
-
-    /// Get maximum sample peak from all frames that have been processed for channel.
-    ///
-    /// The equation to convert to dBFS is: 20 * log10(out)
-    pub fn first_peak(&self, channel_number: u32) -> Result<f64, Error> {
-        Ok(self.find_first_peak(channel_number)? as f64 / BINS as f64)
-    }
-
-    /// Find bin index of first peak
-    fn find_second_peak(&self, channel_number: u32) -> Result<usize, Error> {
-        let first_index = self.find_first_peak(channel_number)?;
-
-        Ok(BINS
-            - self.peaks[channel_number as usize][first_index..]
-                .iter()
-                .rev()
-                .position(|&x| x != 0)
-                .unwrap())
-    }
-
     /// Get second sample peak from all frames that have been processed for channel.
-    ///
-    /// The equation to convert to dBFS is: 20 * log10(out)
-    pub fn second_peak(&self, channel_number: u32) -> Result<f64, Error> {
-        Ok(self.find_second_peak(channel_number)? as f64 / BINS as f64)
-    }
-
-    fn channel_rms_sum(&self, channel_number: u32) -> Result<f64, Error> {
-        if channel_number >= self.channels {
-            return Err(Error::InvalidChannelIndex);
+    fn second_peak(&self, channel_index: usize) -> Result<f64, Error> {
+        let peaks = &self.peaks[channel_index];
+        let mut first = false;
+        for i in 0..=BINS {
+            if peaks[BINS - i] != 0 {
+                if first {
+                    return Ok((BINS - i) as f64 / BINS as f64);
+                }
+                first = true;
+            }
         }
 
+        Ok(0.0)
+    }
+
+    fn channel_rms_sum(&self, channel_index: usize) -> Result<f64, Error> {
         let mut j: u32 = 0;
-        let n = (LOUD_FRACTION * self.block_number as f64).round() as u32;
+        let n = (LOUD_FRACTION * self.block_number as f64) as u32;
         let mut rms_sum = 0.0;
-        for (i, rms) in self.rms[channel_number as usize].iter().enumerate().rev() {
-            if *rms > 0 {
+        for (i, rms) in self.rms[channel_index].iter().enumerate().rev() {
+            if *rms != 0 {
                 rms_sum += sqr(i as f64 / BINS as f64);
                 j += rms;
             }
-            if j >= n {
+
+            if j > n {
                 break;
             }
         }
@@ -356,17 +339,15 @@ impl DRMeter {
     /// in case you reached the end of stream you should finalize instance
     /// before getting the results.
     pub fn exact_channel_dr(&self, channel_number: u32) -> Result<f64, Error> {
+        self.check_channel(channel_number)?;
         if let Some(channel_dr) = &self.channel_dr {
-            if channel_number >= self.channels {
-                return Err(Error::InvalidChannelIndex);
-            }
             Ok(channel_dr[channel_number as usize])
         } else {
             // channel checking inside
             Ok(decibel(
-                self.second_peak(channel_number)?
+                self.second_peak(channel_number as usize)?
                     / f64::sqrt(
-                        self.channel_rms_sum(channel_number)?
+                        self.channel_rms_sum(channel_number as usize)?
                             / (LOUD_FRACTION * self.block_number as f64),
                     ),
             ))
@@ -379,6 +360,7 @@ impl DRMeter {
     /// in case you reached the end of stream you should finalize instance
     /// before getting the results.
     pub fn channel_dr_score(&self, channel_number: u32) -> Result<u8, Error> {
+        self.check_channel(channel_number)?;
         Ok(self.exact_channel_dr(channel_number)? as u8)
     }
 
@@ -403,10 +385,6 @@ impl DRMeter {
     pub fn dr_score(&self) -> Result<u8, Error> {
         Ok(self.exact_dr()? as u8)
     }
-
-    /*pub fn rms(&self, channels: u32) -> Result<f64, Error> {
-        self.channel_rms_sum(channel_number)
-    }*/
 
     /// Get average exact DR score across multiple instances.
     /// This can be used to calculate Albums DR score
